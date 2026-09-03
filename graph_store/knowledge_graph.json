@@ -1,0 +1,58 @@
+{
+  "directed": true,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "label": "RAG",
+      "frequency": 1,
+      "id": "rag"
+    },
+    {
+      "label": "Knowledge Graph",
+      "frequency": 0,
+      "id": "knowledge graph"
+    },
+    {
+      "label": "Graph RAG",
+      "frequency": 1,
+      "id": "graph rag"
+    }
+  ],
+  "edges": [
+    {
+      "predicate": "uses",
+      "predicates": [
+        "uses"
+      ],
+      "weight": 1,
+      "source_file": "controlled_p5_test.txt",
+      "chunk_id": "p5_controlled_chunk_1",
+      "provenance": [
+        {
+          "source_file": "controlled_p5_test.txt",
+          "chunk_id": "p5_controlled_chunk_1"
+        }
+      ],
+      "source": "rag",
+      "target": "knowledge graph"
+    },
+    {
+      "predicate": "uses",
+      "predicates": [
+        "uses"
+      ],
+      "weight": 1,
+      "source_file": "controlled_p5_test.txt",
+      "chunk_id": "p5_controlled_chunk_1",
+      "provenance": [
+        {
+          "source_file": "controlled_p5_test.txt",
+          "chunk_id": "p5_controlled_chunk_1"
+        }
+      ],
+      "source": "graph rag",
+      "target": "knowledge graph"
+    }
+  ]
+}
