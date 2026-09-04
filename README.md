@@ -13,18 +13,8 @@ A local-first agentic research assistant that combines hybrid retrieval, Graph R
      File path: docs/images/chat.png
      Recommended dimensions: 1920x1080 (16:9)
 -->
-> **Screenshot Placeholder** · `docs/images/chat.png`  
-> *Main Chat Workspace — Multi-agent research console featuring progressive disclosure of agent reasoning, inline verifiable citations, and real-time streaming status.*
-
-<br/>
-
-<!-- SCREENSHOT PLACEHOLDER
-     Replace with: Agent Execution & Retrieval Trace
-     File path: docs/images/agent-trace.png
-     Recommended dimensions: 1920x1080 (16:9)
--->
-> **Screenshot Placeholder** · `docs/images/agent-trace.png`  
-> *Execution Telemetry — Step-by-step visibility into the LangGraph state machine: Supervisor routing, sub-query decomposition, candidate retrieval scores, critique metrics, and reviewer consensus.*
+><img src="docs/images/chat.png" width="960">
+ _Main Chat Workspace_
 
 <br/>
 
@@ -33,8 +23,8 @@ A local-first agentic research assistant that combines hybrid retrieval, Graph R
      File path: docs/images/knowledge-graph.png
      Recommended dimensions: 1920x1080 (16:9)
 -->
-> **Screenshot Placeholder** · `docs/images/knowledge-graph.png`  
-> *Knowledge Graph Workspace — Interactive entity-relationship visualization with physics layout, relationship filtering, and chunk-level provenance tracing.*
+><img src="docs/images/knowledgeGraph.png" width="960">
+*Knowledge Graph Workspace*
 
 <br/>
 
@@ -43,8 +33,21 @@ A local-first agentic research assistant that combines hybrid retrieval, Graph R
      File path: docs/images/documents.png
      Recommended dimensions: 1920x1080 (16:9)
 -->
-> **Screenshot Placeholder** · `docs/images/documents.png`  
-> *Document Library — Chunk inspection, parsing strategy configuration (sentence, parent-child, semantic), vector index health, and relational extraction toggles.*
+><img src="docs/images/documentIngestion.png" width="960">
+*Document Ingestion*
+
+<br/>
+
+><img src="docs/images/responseGen.png" width="960">
+*Multi-Stage Response Generation*
+
+<br/>
+
+><img src="docs/images/response.png" width="960">
+*Chat Response*
+
+
+
 
 ---
 
@@ -78,7 +81,7 @@ graph TD
     Supervisor -->|Single Fact / Retrieval| Researcher
 
     Planner --> Researcher[Researcher Agent\nTool Execution: Document Search · Graph RAG · Optional Web]
-    Researcher --> Generator[Generator Agent\nDomain-Adapted Synthesis with [Source N] Citations]
+    Researcher --> Generator[Generator Agent\nDomain-Adapted Synthesis with Source Citations]
 
     Generator --> Critic[Critic Agent\nFaithfulness & Completeness Verification]
     Critic --> Reviewer[Reviewer Agent\nConsensus Scoring: 0.0 - 10.0]
@@ -312,7 +315,6 @@ Local LLM:       Ollama (qwen3:4b / mistral-rag)
 Cloud Fallback:  Groq (llama3-70b-8192)
 Frontend:        Next.js 14 (App Router) · React 18 · TypeScript
 Styling & UI:    Tailwind CSS · Radix UI · Lucide React · d3-force
-Test Framework:  pytest · pytest-asyncio
 ```
 
 ---
@@ -378,11 +380,6 @@ curl -X POST "http://localhost:8000/api/documents/upload" \
   -F "file=@path/to/paper.pdf" \
   -F "strategy=sentence" \
   -F "build_graph=false"
-```
-
-### 8. Run automated tests
-```bash
-python -m pytest tests/ -v
 ```
 
 ---
