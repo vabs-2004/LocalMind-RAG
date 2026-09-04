@@ -323,6 +323,7 @@ def ingest(
 
             graph_stats = build_knowledge_graph(
                 nodes,
+                max_chunks=15,
             )
 
             graph_built = True

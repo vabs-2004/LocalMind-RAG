@@ -1,4 +1,4 @@
-"""
+""""
 graph_store/knowledge_graph.py  —  P5-T1
 Build a persistent knowledge graph from ingested documents.
 
@@ -67,6 +67,74 @@ Text:
 """
 
 
+def _parse_triples_json(raw: str) -> List[dict]:
+    """
+    Robustly extract and validate JSON triples array from LLM response string.
+    Handles:
+      - <think>...</think> reasoning tags
+      - markdown ```json ... ``` code blocks
+      - conversational preamble and trailing commentary
+      - malformed JSON and predicate normalization
+    """
+    if not raw or not isinstance(raw, str):
+        return []
+
+    # 1. Strip reasoning/think tags (e.g. Qwen, DeepSeek)
+    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", raw, flags=re.IGNORECASE).strip()
+
+    # 2. Extract content from markdown code fence if present
+    fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned, re.IGNORECASE)
+    if fence_match:
+        candidate = fence_match.group(1).strip()
+    else:
+        candidate = cleaned
+
+    # 3. Parse JSON array
+    data = None
+    try:
+        data = json.loads(candidate)
+    except Exception:
+        # Fallback: search for outermost [ ... ] array
+        array_match = re.search(r"\[\s*\{[\s\S]*\}\s*\]", candidate)
+        if array_match:
+            try:
+                data = json.loads(array_match.group(0))
+            except Exception:
+                pass
+
+        # Fallback: search for single object { ... } if model emitted single triple
+        if data is None:
+            dict_match = re.search(r"\{[\s\S]*\}", candidate)
+            if dict_match:
+                try:
+                    single = json.loads(dict_match.group(0))
+                    if isinstance(single, dict):
+                        data = [single]
+                except Exception:
+                    pass
+
+    if not isinstance(data, list):
+        return []
+
+    valid_predicates = {
+        "is-a", "part-of", "uses", "produces", "improves-on",
+        "trained-on", "evaluated-on", "introduced-by", "related-to", "contrasts-with",
+    }
+
+    valid = []
+    for t in data:
+        if not isinstance(t, dict):
+            continue
+        subj = str(t.get("subject", "")).strip()
+        pred = str(t.get("predicate", "")).strip().lower()
+        obj = str(t.get("object", "")).strip()
+
+        if subj and obj and pred in valid_predicates:
+            valid.append({"subject": subj, "predicate": pred, "object": obj})
+
+    return valid[:8]  # max 8 triples per chunk
+
+
 def extract_triples(text: str, llm=None) -> List[dict]:
     """
     Extract entity-relationship triples from a text chunk using an LLM.
@@ -83,36 +151,10 @@ def extract_triples(text: str, llm=None) -> List[dict]:
 
     try:
         response = llm.invoke(prompt)
-        raw = response.content.strip()
-
-        # Strip markdown fences
-        if "```" in raw:
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-
-        triples = json.loads(raw)
-        if not isinstance(triples, list):
-            return []
-
-        # Validate each triple
-        valid = []
-        valid_predicates = {
-            "is-a", "part-of", "uses", "produces", "improves-on",
-            "trained-on", "evaluated-on", "introduced-by", "related-to", "contrasts-with",
-        }
-        for t in triples:
-            if (
-                isinstance(t, dict)
-                and t.get("subject") and t.get("predicate") and t.get("object")
-                and t["predicate"] in valid_predicates
-            ):
-                valid.append(t)
-
-        return valid[:8]  # max 8 triples per chunk
-
+        raw = response.content if hasattr(response, "content") else str(response)
+        return _parse_triples_json(raw)
     except Exception as e:
-        logger.debug(f"[KG] Triple extraction failed: {e}")
+        logger.warning(f"[KG] Triple extraction failed on chunk: {e}")
         return []
 
 
@@ -259,65 +301,134 @@ def add_triples_to_graph(
 
     return added
 
+
+def select_representative_nodes(nodes: List, max_chunks: int = 15) -> List:
+    """
+    Select up to max_chunks representative nodes across the document for KG extraction.
+    1. Filters out trivial/boilerplate chunks (< 30 words) unlikely to contain entity relationships.
+    2. Deterministically samples evenly distributed chunks across the entire document.
+    
+    Note: 100% of all document chunks remain indexed in vector and BM25 stores;
+    sampling applies strictly to the relation-extraction LLM step.
+    """
+    if not nodes:
+        return []
+
+    # 1. Filter out trivial / boilerplate snippets
+    meaningful = [
+        n for n in nodes
+        if len(getattr(n, "text", "").strip().split()) >= 30
+    ]
+    if not meaningful:
+        meaningful = list(nodes)
+
+    if len(meaningful) <= max_chunks:
+        return meaningful
+
+    # 2. Deterministic, document-wide stratification
+    m = len(meaningful)
+    step = (m - 1) / (max_chunks - 1)
+    indices = [round(i * step) for i in range(max_chunks)]
+
+    # Preserve order and eliminate duplicate indices if any
+    seen = set()
+    selected_indices = []
+    for idx in indices:
+        if idx not in seen and 0 <= idx < m:
+            seen.add(idx)
+            selected_indices.append(idx)
+
+    return [meaningful[i] for i in selected_indices]
+
+
 def build_knowledge_graph(
     nodes: List,
     llm=None,
     batch_size: int = 20,
+    max_chunks: int = 15,
+    checkpoint_interval: int = 3,
 ) -> dict:
     """
     Build or update the knowledge graph from a list of document nodes.
 
-    Processes nodes in batches to manage memory and API rate limits.
-    Skips nodes whose chunk_id is already in the graph (incremental build).
+    - Reuses a single LLM client instance across the entire extraction.
+    - Caps extraction to representative chunks (<= max_chunks) to avoid 10+ min hangs.
+    - 100% of document chunks are retained in vector/BM25 retrieval.
+    - Checkpoints graph incrementally to disk during extraction.
+    - Merges with existing graph without duplicate edges or lost provenance.
 
     Args:
-        nodes:      LlamaIndex BaseNode list (from chunker).
-        llm:        LangChain LLM for triple extraction.
-        batch_size: Nodes processed per batch.
+        nodes:               LlamaIndex BaseNode list (from chunker).
+        llm:                 LangChain LLM for triple extraction (reused if provided).
+        batch_size:          Log interval for progress reporting.
+        max_chunks:          Maximum representative chunks to process via local LLM.
+        checkpoint_interval: Save graph to disk every N chunks.
 
     Returns:
-        dict: { nodes: int, edges: int, triples_extracted: int, skipped: int }
+        dict: { nodes, edges, triples_extracted, skipped, chunks_analyzed, total_document_chunks }
 
     Concept: Knowledge Graph Construction
     """
+    # 1. Re-use single LLM client instance
+    if llm is None:
+        from P1.llm_factory import get_langchain_llm
+        llm = get_langchain_llm(temperature=0.0)
+
+    # 2. Load existing graph (persists across document ingestions)
     G = load_graph()
     existing_chunks = set()
-    
+
     for u, v, edge_data in G.edges(data=True):
         # New provenance-aware format
         for provenance in edge_data.get("provenance", []):
             chunk_id = provenance.get("chunk_id")
             if chunk_id:
                 existing_chunks.add(chunk_id)
-    
+
         # Backward compatibility with graphs created before T4
         legacy_chunk_id = edge_data.get("chunk_id")
         if legacy_chunk_id:
             existing_chunks.add(legacy_chunk_id)
 
+    # 3. Select deterministic representative nodes across the document
+    representative_nodes = select_representative_nodes(nodes, max_chunks=max_chunks)
+    logger.info(
+        f"[KG] Representative extraction: selected {len(representative_nodes)}/{len(nodes)} chunks "
+        f"(capped at {max_chunks} for local LLM extraction; 100% of chunks indexed in vector/BM25)"
+    )
+
     total_triples = 0
     skipped = 0
 
-    for i in range(0, len(nodes), batch_size):
-        batch = nodes[i: i + batch_size]
-        for node in batch:
-            chunk_id = node.node_id
-            if chunk_id in existing_chunks:
-                skipped += 1
-                continue
+    # 4. Sequential extraction with incremental checkpointing
+    for idx, node in enumerate(representative_nodes):
+        chunk_id = getattr(node, "node_id", None) or getattr(node, "id_", "unknown")
+        if chunk_id in existing_chunks:
+            skipped += 1
+            continue
 
-            source_file = node.metadata.get("filename", "unknown")
-            triples = extract_triples(node.text, llm=llm)
+        source_file = node.metadata.get("filename", "unknown") if hasattr(node, "metadata") else "unknown"
+        triples = extract_triples(node.text, llm=llm)
 
-            if triples:
-                added = add_triples_to_graph(G, triples, source_file, chunk_id)
-                total_triples += added
+        if triples:
+            added = add_triples_to_graph(G, triples, source_file, chunk_id)
+            total_triples += added
 
-        logger.info(
-            f"[KG] Processed {min(i + batch_size, len(nodes))}/{len(nodes)} nodes "
-            f"| edges={G.number_of_edges()} | triples={total_triples}"
-        )
+        # Incremental checkpointing
+        if (idx + 1) % checkpoint_interval == 0:
+            save_graph(G)
+            logger.debug(
+                f"[KG] Checkpointed graph at chunk {idx + 1}/{len(representative_nodes)} "
+                f"| edges={G.number_of_edges()} | triples={total_triples}"
+            )
 
+        if (idx + 1) % batch_size == 0 or (idx + 1) == len(representative_nodes):
+            logger.info(
+                f"[KG] Processed {idx + 1}/{len(representative_nodes)} representative chunks "
+                f"| edges={G.number_of_edges()} | triples={total_triples}"
+            )
+
+    # 5. Final persistence
     save_graph(G)
 
     result = {
@@ -325,6 +436,8 @@ def build_knowledge_graph(
         "edges": G.number_of_edges(),
         "triples_extracted": total_triples,
         "skipped": skipped,
+        "chunks_analyzed": len(representative_nodes),
+        "total_document_chunks": len(nodes),
     }
     logger.info(f"[KG] Build complete: {result}")
     return result

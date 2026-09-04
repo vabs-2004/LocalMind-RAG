@@ -163,8 +163,8 @@ def build_summary_index(nodes, embed_model=None,collection_name=SUMMARY_COLLECTI
     from llama_index.core.schema import TextNode
 
     if embed_model is None:
-        from config import EMBED_MODEL
-        embed_model = EMBED_MODEL
+        from P1.llm_factory import get_embedding_model
+        embed_model = get_embedding_model()
 
     summary_nodes = []
 

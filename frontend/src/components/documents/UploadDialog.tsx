@@ -193,17 +193,22 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
                 />
               </div>
 
-              <div className="flex items-center gap-2 pt-1">
-                <input
-                  type="checkbox"
-                  id="build_graph"
-                  checked={buildGraph}
-                  onChange={(e) => setBuildGraph(e.target.checked)}
-                  className="accent-accent rounded"
-                />
-                <label htmlFor="build_graph" className="cursor-pointer text-foreground-secondary">
-                  Extract knowledge graph triples using local LLM
-                </label>
+              <div className="pt-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="build_graph"
+                    checked={buildGraph}
+                    onChange={(e) => setBuildGraph(e.target.checked)}
+                    className="accent-accent rounded"
+                  />
+                  <label htmlFor="build_graph" className="cursor-pointer text-foreground-secondary">
+                    Extract knowledge graph triples using local LLM
+                  </label>
+                </div>
+                <p className="text-[11px] text-foreground-muted pl-5 pt-0.5">
+                  Analyzes representative document sections to extract entity relationships. Processing time increases with local LLM inference.
+                </p>
               </div>
             </div>
           )}
@@ -219,7 +224,11 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
         {uploadStatus === "processing" && (
           <div className="flex items-center gap-2 text-xs text-foreground-secondary py-1">
             <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
-            <span>Parsing structure, generating chunk embeddings & updating BM25...</span>
+            <span>
+              {buildGraph
+                ? "Indexing document vectors and extracting relational graph triples (local LLM)..."
+                : "Parsing structure, generating chunk embeddings & updating BM25..."}
+            </span>
           </div>
         )}
         {uploadStatus === "success" && (

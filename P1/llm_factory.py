@@ -36,7 +36,11 @@ def get_llama_llm(temperature: float = 0.1, streaming: bool = False):
             context_window=8192,
         )
     
-def get_langchain_llm(temperature: float = 0.1, streaming: bool = False):
+def get_langchain_llm(
+    temperature: float = 0.1,
+    streaming: bool = False,
+    request_timeout: float = None,
+):
     """Return a LangChain-compatible LLM."""
     if LLM_BACKEND == "groq":
         from langchain_groq import ChatGroq
@@ -48,11 +52,13 @@ def get_langchain_llm(temperature: float = 0.1, streaming: bool = False):
         )
     else:  # ollama (default)
         from langchain_ollama import ChatOllama
+        timeout = request_timeout if request_timeout is not None else float(os.getenv("OLLAMA_TIMEOUT", "120.0"))
         return ChatOllama(
             model=os.getenv("OLLAMA_MODEL", "mistral-rag"),
             base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             temperature=temperature,
             streaming=streaming,
+            client_kwargs={"timeout": timeout},
         )
 
 def get_embedding_model():
